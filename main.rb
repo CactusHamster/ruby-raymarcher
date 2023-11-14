@@ -1,9 +1,10 @@
 require_relative "ext/opengl/opengl"
+require_relative "ext/glfw/glfw"
 include GL
 include GLFW
-GLFW::init()
-window = GLFW::Window.new(600, 800, "window")
-window.make_current()
+
+game_running = true
+win = nil
 
 class Camera
     def initialize
@@ -22,23 +23,53 @@ class Camera
     end
 end
 
-camera = Camera.new()
-while !window.should_close() do
-    # Poll key events.
-    GLFW::poll_events()
-
-    # Calculate camera translation.
-    # [ x, y ]
-    
-    if window.get_key_state(GLFW::KEYS[:"d"]) then
-        camera.translatex(1)
-    elsif window.get_key_state(GLFW::KEYS[:"a"]) then
-        camera.translatex(-1)
+class EventHandler
+    def keydown (kevent)
+        translate_x = 0
+        translate_y = 0
+        if kevent.key == GLFW::KEYS[:"D"] then
+            translate_x += 1
+        elsif kevent.key == GLFW::KEYS[:"A"] then
+            translate_x -= 1
+        end
+        if kevent.key == GLFW::KEYS[:"W"] then
+            translate_x += 1
+        elsif kevent.key == GLFW::KEYS[:"S"] then
+            translate_x -= 1
+        end
+        if translate_x != 0 then
+            camera.translatex(translate_x)
+        end
+        if translate_y != 0 then
+            camera.translatey(translate_y)
+        end
     end
-    if window.get_key_state(GLFW::KEYS[:"w"]) then
-        camera.translatey(1)
-    elsif window.get_key_state(GLFW::KEYS[:"s"]) then
-        camera.translatey(-1)
+    def keyup (kevent)
+        if kevent.key == GLFW::KEYS[:"ESCAPE"] then
+            game_running = false
+        end
     end
-    sleep(0.2)
+    def resized (size)
+        p "Resized window to #{size[0]}x#{size[1]}"
+    end
 end
+
+
+# Initialize GLFW.
+GLFW::init()
+# Create main window.
+win = GLFW::Window.new(600, 800, "game")
+# Initialize the window.
+win.start_framebuffer_size_events()
+win.start_key_events()
+win.make_current()
+# Listen for key and resize events.
+event_handler = EventHandler.new()
+win.add_observer(event_handler)
+# Create a camera.
+camera = Camera.new()
+# Main loop.
+while !win.should_close() & game_running do
+    GLFW::wait_for_events()
+end
+win.destroy()
