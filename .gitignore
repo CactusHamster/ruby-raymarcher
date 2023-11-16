@@ -13,3 +13,4 @@ ext/glfw/glfw-x64-mingw-ucrt.def
 *.o
 *.so
 *.log
+*.a
