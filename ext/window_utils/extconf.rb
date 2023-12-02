@@ -1,6 +1,9 @@
 #!/usr/bin/env ruby
 require 'mkmf'
-require 'rbconfig'
+
+def check_GL ()
+    raise "GL/gl.h not found." unless find_header "GL/gl.h"
+end
 
 def glfw_name ()
     return 'glfw3' if /mswin|msys|mingw|cygwin|bccwin|wince|emc/.match?(RbConfig::CONFIG["host_os"])
@@ -22,6 +25,7 @@ def check_glfw ()
     end
 end
 
+check_GL()
 check_glfw()
 create_header
-result = create_makefile "glfw/glfw"
+result = create_makefile "window_utils/window_utils"

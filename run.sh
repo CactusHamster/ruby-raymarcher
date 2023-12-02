@@ -6,15 +6,12 @@ fi
 
 
 if [[ $target == "build" ]]; then
-    make -C ext/opengl
-    make -C ext/glfw
+    make -C ext/window_utils
 elif [[ $target == "debug" ]]; then
-    make -C ext/opengl CFLAGS="-g -Wall" && \
-    make -C ext/glfw CFLAGS="-g -Wall" && \
-    gdb --args ruby main.rb
+    make -C ext/window_utils CFLAGS="--verbose -Wall" && \
+    ruby main.rb
 elif [[ $target == "default" ]]; then
-    make -C ext/opengl && \
-    make -C ext/glfw && \
+    make -C ext/window_utils && \
     ruby main.rb 
 else
     echo "Unknown target \"${target}\"."

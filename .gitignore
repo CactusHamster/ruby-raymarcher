@@ -1,16 +1,10 @@
 .ruby-lsp
 .vscode
 
-ext/opengl/opengl-x64-mingw-ucrt.def
-ext/opengl/Makefile
-ext/opengl/extconf.h
-
-ext/glfw/opengl-x64-mingw-ucrt.def
-ext/glfw/Makefile
-ext/glfw/extconf.h
-ext/glfw/glfw-x64-mingw-ucrt.def
-
 *.o
 *.so
 *.log
 *.a
+*.def
+ext/window_utils/Makefile
+ext/window_utils/extconf.h
