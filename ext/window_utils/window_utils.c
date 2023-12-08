@@ -8,9 +8,19 @@
 #define GLFW_INCLUDE_GLEXT
 #include "extconf.h"
 
+// Debug print
+#ifdef DEBUG
+#define PRINT_DEBUG(fmt, ...) \
+    fprintf(stderr, fmt, __VA_ARGS__)
+#else
+#define PRINT_DEBUG(fmt, ...) \
+    do { } while (0)
+#endif
+
 // Global types.
-VALUE CLASS_KEY_EVENT;
-VALUE CLASS_BUFFER;
+VALUE CLASS_KEY_EVENT = Qnil;
+VALUE CLASS_BUFFER = Qnil;
+int GLFW_INITIALIZED = FALSE;
 
 /*
     Start of GLFW constant init.
@@ -226,7 +236,7 @@ VALUE rb_window_emit (VALUE self, VALUE event, VALUE data) {
     WindowData* windowdata;
     TypedData_Get_Struct(self, WindowData, &rb_window_type, windowdata);
     long len = RARRAY_LEN(windowdata->observers);
-    ID event_intern = rb_intern(RSTRING_PTR(event));
+    ID event_intern = rb_intern(RSTRING_PTR(rb_str_concat(rb_str_new("on_", 3), event)));
     for (long i = 0; i < len; i++) {
         VALUE observer = rb_ary_entry(windowdata->observers, i);
         if (rb_respond_to(observer, event_intern)) {
@@ -309,7 +319,12 @@ void init_window_under (VALUE module) {
 /// Destroy GLFW context.
 VALUE rb_glfw_destroy () {
     glfwTerminate();
+    GLFW_INITIALIZED = FALSE;
     return Qnil;
+}
+/// GLFW is initialized?
+VALUE rb_glfw_is_initialized () {
+    return GLFW_INITIALIZED == TRUE ? Qtrue : Qfalse;
 }
 /// Poll for keys on the current window.
 VALUE rb_glfw_poll_events () {
@@ -330,6 +345,7 @@ void error_callback(int code, const char* description) { printf("[ERR]: %i %s", 
 VALUE rb_glfw_init (void) {
     glfwSetErrorCallback(error_callback);
     int success = glfwInit();
+    GLFW_INITIALIZED = success == GLFW_TRUE ? TRUE : FALSE;
     return success == GLFW_TRUE ? Qtrue : Qfalse;
 }
 /// Initialize the Ruby GLFW module.
@@ -343,6 +359,7 @@ VALUE init_general_glfw () {
     rb_define_module_function(glfw_module, "poll_events", rb_glfw_poll_events, 0);
     rb_define_module_function(glfw_module, "wait_for_events", rb_glfw_wait_for_events, 0);
     rb_define_module_function(glfw_module, "get_scancode", rb_glfw_get_scancode, 1);
+    rb_define_module_function(glfw_module, "is_initialized?", rb_glfw_is_initialized, 0);
     return glfw_module;
 }
 /*
@@ -457,8 +474,7 @@ VALUE rb_gl_shader_source (VALUE self, VALUE rb_shader, VALUE source_string) {
     const char* csource_str = StringValueCStr(source_string);
     glShaderSource(shader, 1, &csource_str, &source_length);
     CHECKGL();
-    //@DEBUG
-    printf("Using shader source\n%s\n\n", csource_str);
+    PRINT_DEBUG("Using shader source\n%s\n\n", csource_str);
     return Qnil;
 }
 // Print the error log from an OpenGL shader.
@@ -551,6 +567,7 @@ VALUE rb_gl_link_program (VALUE self, VALUE rb_program) {
 VALUE rb_gl_use_program (VALUE self, VALUE rb_program) {
     if (glUseProgram == NULL) { GLPROC_CHECKED(glUseProgram, void, GLuint); }
     GLuint program = NUM2INT(rb_program);
+    PRINT_DEBUG("Using program %i.\n\n", program);
     glUseProgram(program);
     CHECKGL();
     return Qnil;
@@ -576,6 +593,7 @@ VALUE rb_gl_get_uniform_location (VALUE self, VALUE rb_program, VALUE rb_name) {
     const char* cname = rb_string_value_cstr(&rb_name);
     GLint location = glGetUniformLocation(program, cname);
     CHECKGL();
+    PRINT_DEBUG("Found uniform `%s` at location %i in program %i.\n\n", cname, location, program);
     return INT2NUM(location);
 }
 
@@ -586,7 +604,7 @@ VALUE rb_gl_alloc_vertex_array_object () {
     if (glGenVertexArrays == NULL) { GLPROC_CHECKED(glGenVertexArrays, void, GLsizei, GLuint*); }
     GLuint vao;
     glGenVertexArrays(1, &vao);
-    printf("Generated Vertex Array %i.\n\n", vao);
+    PRINT_DEBUG("Generated Vertex Array %i.\n\n", vao);
     return INT2NUM(vao);
 }
 // Bind a Vertex Array Object to the current context.
@@ -595,15 +613,13 @@ VALUE rb_gl_bind_vertex_array_object (VALUE self, VALUE rb_vao) {
     if (glBindVertexArray == NULL) { GLPROC_CHECKED(glBindVertexArray, void, GLuint); }
     GLuint vao = NUM2INT(rb_vao);
     glBindVertexArray(vao);
-    //@DEBUG
-    printf("Bound Vertex Array %i.\n\n", vao);
+    PRINT_DEBUG("Bound Vertex Array %i.\n\n", vao);
     return Qnil;
 }
 // Unbind current Vertex Array Object from the current context.
 VALUE rb_gl_unbind_vertex_array_object () {
     if (glBindVertexArray == NULL) { GLPROC_CHECKED(glBindVertexArray, void, GLuint); }
-    //@DEBUG
-    printf("Unbound Vertex Array.\n\n");
+    PRINT_DEBUG("Unbound Vertex Array.\n\n");
     glBindVertexArray(GL_ZERO);
 }
 // Allocate a Buffer.
@@ -613,8 +629,7 @@ VALUE rb_gl_alloc_buffer_object (VALUE self) {
     if (glGenBuffers == NULL) { GLPROC_CHECKED(glGenBuffers, void, GLsizei, GLuint*); }
     GLuint vbo;
     glGenBuffers(1, &vbo);
-    //@DEBUG
-    printf("Allocated Buffer %i.\n\n", vbo);
+    PRINT_DEBUG("Allocated Buffer %i.\n\n", vbo);
     return INT2NUM(vbo);
 }
 // Bind a Buffer to the current context and target.
@@ -626,8 +641,7 @@ VALUE rb_gl_bind_buffer_object (VALUE self, VALUE rb_target, VALUE rb_vbo) {
     GLuint vbo = NUM2UINT(rb_vbo);
     GLenum target = NUM2UINT(rb_target);
     glBindBuffer(target, vbo);
-    //@DEBUG
-    printf("Bound Buffer %i to target %i.\n\n", vbo, target);
+    PRINT_DEBUG("Bound Buffer %i to target %i.\n\n", vbo, target);
     return Qnil;
 }
 // Unbind current Buffer from the current context.
@@ -635,38 +649,38 @@ VALUE rb_gl_unbind_buffer_object (VALUE self, VALUE rb_target) {
     if (glBindBuffer == NULL) { GLPROC_CHECKED(glBindBuffer, void, GLenum, GLuint); }
     GLenum target = NUM2UINT(rb_target);
     glBindBuffer(target, GL_ZERO);
-    //@DEBUG
-    printf("Unbound buffer from target %i.\n\n", target);
+    PRINT_DEBUG("Unbound buffer from target %i.\n\n", target);
     return Qnil;
 }
 // Load data into the current Buffer.
 DEF_GLPROC(glBufferData, void, GLenum, GLsizeiptr, const void*, GLenum);
 VALUE rb_gl_set_buffer_data (VALUE self, VALUE rb_target, VALUE rb_data, VALUE rb_usage) {
-    // rb_target is the buffer kind
     if (glBufferData == NULL) { GLPROC_CHECKED(glBufferData, void, GLenum, GLsizeiptr, const void*, GLenum); }
-    //@TODO: Add enums for buffer kinds/types
-    //@TODO: Handle IO::Buffer, uint8[], and strings
     long length;
     unsigned char* bytes;
     if (RB_TYPE_P(rb_data, T_STRING)) {
         length = RSTRING_LEN(rb_data);
         bytes = StringValuePtr(rb_data);
-    } else if (rb_obj_is_kind_of(rb_data, CLASS_BUFFER)) {
-        size_t tlength;
-        rb_io_buffer_get_bytes(rb_data, (void**) &bytes, (size_t*) &tlength);
-        length = (long) tlength;
     } else {
-        rb_raise(rb_eException, "%s%s", "Data must be of class String or IO::Buffer.", RB_TYPE_P(rb_data, T_ARRAY) ? " Did you pack your data?" : "");
-        return Qnil;
+        if (CLASS_BUFFER == Qnil) CLASS_BUFFER = rb_path2class("IO::Buffer");
+        if (rb_obj_is_kind_of(rb_data, CLASS_BUFFER)) {
+            size_t tlength;
+            rb_io_buffer_get_bytes(rb_data, (void**) &bytes, (size_t*) &tlength);
+            length = (long) tlength;
+        } else {
+            rb_raise(rb_eException, "%s%s", "Data must be of class String or IO::Buffer.", RB_TYPE_P(rb_data, T_ARRAY) ? " Did you pack your data?" : "");
+            return Qnil;
+        }
     }
     GLenum target = NUM2UINT(rb_target);
     GLenum usage = NUM2UINT(rb_usage);
     glBufferData(target, (GLsizeiptr) length, (const void*) bytes, usage);
     CHECKGL();
-    //@DEBUG
+    #ifdef DEBUG
     printf("Buffering %ld bytes to target %i for usage %i.\n", length, target, usage);
     for (long i = 0; i < length; i++) printf("%02x ", bytes[i]);
     printf("\n\n");
+    #endif
     return Qnil;
 }
 // Create a Vertex Attribute Array.
@@ -674,8 +688,7 @@ DEF_GLPROC(glEnableVertexAttribArray, void, GLuint);
 VALUE rb_gl_enable_vertex_attribute_array (VALUE self, VALUE rb_index) {
     if (glEnableVertexAttribArray == NULL) { GLPROC_CHECKED(glEnableVertexAttribArray, void, GLuint); }
     GLuint index = NUM2UINT(rb_index);
-    //@DEBUG
-    printf("Created Vertex Attribute Array at index %i.\n\n", index);
+    PRINT_DEBUG("Created Vertex Attribute Array at index %i.\n\n", index);
     glEnableVertexAttribArray(index);
     CHECKGL();
     return Qnil;
@@ -706,14 +719,13 @@ VALUE rb_gl_set_vertex_attribute_pointer (VALUE self, VALUE rb_index, VALUE rb_c
     }
     void* start_ptr = (void*) NUM2SIZET(rb_start_ptr);
 
-
-    //@DEBUG
+    #ifdef DEBUG
     char* kind_str;
     if (kind == GL_FLOAT) kind_str = "GL_FLOAT";
     else if (kind == GL_INT) kind_str = "GL_INT";
     else if (kind == GL_UNSIGNED_INT) kind_str = "GL_UNSIGNED_INT";
-    printf("Vertex Attribute Pointer at index %i has %i %s components per vertex (making each vertex stride %i bytes of space), and %s normalized.\nIt starts at location %p.\n\n", index, component_count, kind_str, stride, normalize == GL_TRUE ? "is" : "is not", start_ptr);
-    
+    PRINT_DEBUG("Vertex Attribute Pointer at index %i has %i %s components per vertex (making each vertex stride %i bytes of space), and %s normalized.\nIt starts at location %p.\n\n", index, component_count, kind_str, stride, normalize == GL_TRUE ? "is" : "is not", start_ptr);
+    #endif
     
     glVertexAttribPointer(
         index,
@@ -735,12 +747,60 @@ VALUE rb_gl_draw_elements (VALUE self, VALUE rb_mode, VALUE rb_count, VALUE rb_t
     const void* indices = (void*) NUM2SIZET(rb_indices_ptr);
     glDrawElements(mode, count, type, indices);
     CHECKGL();
-    //@DEBUG
-    printf("Drawing %i vertices of type %i starting at %p in mode %i.\n\n", count, type, indices, mode);
+    PRINT_DEBUG("Drawing %i vertices of type %i starting at %p in mode %i.\n\n", count, type, indices, mode);
     return Qnil;
 }
 
 
+/*
+    glUniform1f
+    glUniform2f
+    glUniform3f
+    glUniform4f
+    same as f for i, ui, fv, iv, uiv
+    then we have matrices 2fv, 3fv, 4fv, 2x3, 3x2, 2x4, 4x2, 3x4, 4x3
+*/
+#define NUM2TYPE(rbtype, rb_value) NUM2##rbtype(rb_value)
+#define STRINGIFY(x) #x
+
+#define DEF_RB_GL_UNIFORM(count, typeletter, ctype, rbtype_uppercase) \
+DEF_GLPROC(glUniform##count##typeletter##v, void, GLint, GLsizei, const GL##ctype*); \
+VALUE rb_gl_set_uniform##count##typeletter (VALUE self, VALUE rb_location, VALUE rb_args) { \
+    Check_Type(rb_args, T_ARRAY); \
+    int argc = (int) rb_array_len(rb_args); \
+    if (argc != count) { \
+        rb_raise(rb_eRuntimeError, "%i arguments passed, " #count "expected.", argc); \
+        return Qnil; \
+    }; \
+    if (glUniform##count##typeletter##v == NULL) { GLPROC_CHECKED(glUniform##count##typeletter##v, void, GLint, GLsizei, const GL##ctype*); } \
+    PRINT_DEBUG("Updating uniform" #count #typeletter " at location %i with data [ ", NUM2INT(rb_location)); \
+    GL##ctype values[count]; \
+    for (int i = 0; i < count; i++) { \
+        VALUE rb_value = rb_ary_entry(rb_args, i); \
+        values[i] = (GL##ctype) NUM2TYPE(rbtype_uppercase, rb_value); \
+        PRINT_DEBUG("%f%s", values[i], i == count - 1 ? "" : ", "); \
+    }; \
+    PRINT_DEBUG(" ].\n\n"); \
+    GLint location = NUM2INT(rb_location); \
+    glUniform##count##typeletter##v(location, 1, values); \
+    CHECKGL(); \
+    return Qnil; \
+}
+#define DEF_RB_GL_UNIFORM_FULL(typeletter, ctype, rbtype_uppercase) \
+    DEF_RB_GL_UNIFORM(1, typeletter, ctype, rbtype_uppercase); \
+    DEF_RB_GL_UNIFORM(2, typeletter, ctype, rbtype_uppercase); \
+    DEF_RB_GL_UNIFORM(3, typeletter, ctype, rbtype_uppercase); \
+    DEF_RB_GL_UNIFORM(4, typeletter, ctype, rbtype_uppercase);
+#define EXPOSE_RB_GL_UNIFORM(module, count, typeletter) rb_define_module_function(module, "set_uniform" #count #typeletter, rb_gl_set_uniform##count##typeletter, 2);
+#define EXPOSE_RB_GL_UNIFORM_FULL(module, typeletter) \
+    EXPOSE_RB_GL_UNIFORM(module, 1, typeletter); \
+    EXPOSE_RB_GL_UNIFORM(module, 2, typeletter); \
+    EXPOSE_RB_GL_UNIFORM(module, 3, typeletter); \
+    EXPOSE_RB_GL_UNIFORM(module, 4, typeletter);
+
+DEF_RB_GL_UNIFORM_FULL(i, int, INT);
+DEF_RB_GL_UNIFORM_FULL(ui, uint, UINT);
+DEF_RB_GL_UNIFORM_FULL(f, float, DBL);
 // Initialize important OpenGL constants.
 void init_opengl_constants (VALUE module) {
     // Shaders
@@ -778,51 +838,48 @@ void check_gl_version (void) {
 
 // Initialize everything important in this file.
 void Init_window_utils (void) {
-
-    // Requires.
-    // rb_require("IO");
-    CLASS_BUFFER = rb_path2class("IO::Buffer");
-    
-
     // GLFW module.
     VALUE glfw_module = init_general_glfw();
     define_glfw_keys_under(glfw_module);
     define_glfw_key_mods_under(glfw_module);
     CLASS_KEY_EVENT = init_keyevent_under(glfw_module);
     init_window_under(glfw_module);
-
     // OpenGL module.
     MOD_GL = rb_define_module("GL");
     init_opengl_constants(MOD_GL);
-    rb_define_method(MOD_GL, "set_clear_color", rb_gl_set_clear_color, 3);
-    rb_define_method(MOD_GL, "clear", rb_gl_clear, 0);
-    rb_define_method(MOD_GL, "viewport", rb_gl_viewport, 2);
+    rb_define_module_function(MOD_GL, "set_clear_color", rb_gl_set_clear_color, 3);
+    rb_define_module_function(MOD_GL, "clear", rb_gl_clear, 0);
+    rb_define_module_function(MOD_GL, "viewport", rb_gl_viewport, 2);
     // shaders:
-    rb_define_method(MOD_GL, "create_shader", rb_gl_create_shader, 1);
-    rb_define_method(MOD_GL, "shader_source", rb_gl_shader_source, 2);
-    rb_define_method(MOD_GL, "shader_log", rb_gl_get_shader_log, 1);
-    rb_define_method(MOD_GL, "compile_shader", rb_gl_compile_shader, 1);
-    rb_define_method(MOD_GL, "shader_deleted?", rb_gl_shader_is_deleted, 1);
-    rb_define_method(MOD_GL, "delete_shader", rb_gl_delete_shader, 1);
+    rb_define_module_function(MOD_GL, "shader_source", rb_gl_shader_source, 2);
+    rb_define_module_function(MOD_GL, "create_shader", rb_gl_create_shader, 1);
+    rb_define_module_function(MOD_GL, "shader_log", rb_gl_get_shader_log, 1);
+    rb_define_module_function(MOD_GL, "compile_shader", rb_gl_compile_shader, 1);
+    rb_define_module_function(MOD_GL, "shader_deleted?", rb_gl_shader_is_deleted, 1);
+    rb_define_module_function(MOD_GL, "delete_shader", rb_gl_delete_shader, 1);
     // programs:
-    rb_define_method(MOD_GL, "create_program", rb_gl_create_program, 0);
-    rb_define_method(MOD_GL, "attach_shader", rb_gl_attach_shader, 2);
-    rb_define_method(MOD_GL, "program_log", rb_gl_get_program_log, 1);
-    rb_define_method(MOD_GL, "link_program", rb_gl_link_program, 1);
-    rb_define_method(MOD_GL, "use_program", rb_gl_use_program, 1);
-    rb_define_method(MOD_GL, "program_deleted?", rb_gl_program_is_deleted, 1);
-    rb_define_method(MOD_GL, "delete_program", rb_gl_delete_program, 1);
-    rb_define_method(MOD_GL, "get_uniform_location", rb_gl_get_uniform_location, 2);
+    rb_define_module_function(MOD_GL, "create_program", rb_gl_create_program, 0);
+    rb_define_module_function(MOD_GL, "attach_shader", rb_gl_attach_shader, 2);
+    rb_define_module_function(MOD_GL, "program_log", rb_gl_get_program_log, 1);
+    rb_define_module_function(MOD_GL, "link_program", rb_gl_link_program, 1);
+    rb_define_module_function(MOD_GL, "use_program", rb_gl_use_program, 1);
+    rb_define_module_function(MOD_GL, "program_deleted?", rb_gl_program_is_deleted, 1);
+    rb_define_module_function(MOD_GL, "delete_program", rb_gl_delete_program, 1);
+    rb_define_module_function(MOD_GL, "get_uniform_location", rb_gl_get_uniform_location, 2);
     // Buffers/Arrays:
-    rb_define_method(MOD_GL, "alloc_vertex_array_object", rb_gl_alloc_vertex_array_object, 0);
-    rb_define_method(MOD_GL, "bind_vertex_array_object", rb_gl_bind_vertex_array_object, 1);
-    rb_define_method(MOD_GL, "unbind_vertex_array_object", rb_gl_unbind_vertex_array_object, 0);
-    rb_define_method(MOD_GL, "alloc_buffer_object", rb_gl_alloc_buffer_object, 0);
-    rb_define_method(MOD_GL, "bind_buffer_object", rb_gl_bind_buffer_object, 2);
-    rb_define_method(MOD_GL, "unbind_buffer_object", rb_gl_unbind_buffer_object, 1);
-    rb_define_method(MOD_GL, "set_buffer_data", rb_gl_set_buffer_data, 3);
-    rb_define_method(MOD_GL, "enable_vertex_attribute_array", rb_gl_enable_vertex_attribute_array, 1);
-    rb_define_method(MOD_GL, "set_vertex_attribute_pointer", rb_gl_set_vertex_attribute_pointer, 5);
-    rb_define_method(MOD_GL, "draw_elements", rb_gl_draw_elements, 4);
+    rb_define_module_function(MOD_GL, "alloc_vertex_array_object", rb_gl_alloc_vertex_array_object, 0);
+    rb_define_module_function(MOD_GL, "bind_vertex_array_object", rb_gl_bind_vertex_array_object, 1);
+    rb_define_module_function(MOD_GL, "unbind_vertex_array_object", rb_gl_unbind_vertex_array_object, 0);
+    rb_define_module_function(MOD_GL, "alloc_buffer_object", rb_gl_alloc_buffer_object, 0);
+    rb_define_module_function(MOD_GL, "bind_buffer_object", rb_gl_bind_buffer_object, 2);
+    rb_define_module_function(MOD_GL, "unbind_buffer_object", rb_gl_unbind_buffer_object, 1);
+    rb_define_module_function(MOD_GL, "set_buffer_data", rb_gl_set_buffer_data, 3);
+    rb_define_module_function(MOD_GL, "enable_vertex_attribute_array", rb_gl_enable_vertex_attribute_array, 1);
+    rb_define_module_function(MOD_GL, "set_vertex_attribute_pointer", rb_gl_set_vertex_attribute_pointer, 5);
+    rb_define_module_function(MOD_GL, "draw_elements", rb_gl_draw_elements, 4);
+    // Uniforms:
+    EXPOSE_RB_GL_UNIFORM_FULL(MOD_GL, f);
+    EXPOSE_RB_GL_UNIFORM_FULL(MOD_GL, i);
+    EXPOSE_RB_GL_UNIFORM_FULL(MOD_GL, ui);
 }
 int main () { return 0; }

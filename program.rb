@@ -27,17 +27,28 @@ class Program
         return nil
     end
     def delete ()
-        if not GL.program_deleted?(@program) then
-            GL::delete_program(@program)
-        end
+        GL::delete_program(@program) unless GL.program_deleted?(@program)
         return nil
     end
     def uniform_location (name)
-        location = GL::get_uniform_location(name)
-        if location == 0 then
-            raise RuntimeError.new("Failed to find uniform in program.")
-        end
+        location = GL::get_uniform_location(@program, name)
+        raise RuntimeError.new("Failed to find uniform `#{name}`.") if location < 0
         return location
+    end
+    def set_float_uniform (name, *values)
+        location = uniform_location(name)
+        #raise "Invalid uniform length #{value.length}." if value.length > 4 or value.length < 1
+        #GL::set_uniform1f(location, value) if value.length == 1
+        #GL::set_uniform2f(location, value) if value.length == 2
+        #GL::set_uniform3f(location, value) if value.length == 3
+        #GL::set_uniform4f(location, value) if value.length == 4
+        case values.length
+            when 1 then GL::set_uniform1f(location, [values[0]])
+            when 2 then GL::set_uniform2f(location, [values[0], values[1]])
+            when 3 then GL::set_uniform3f(location, [values[0], values[1], values[2]])
+            when 4 then GL::set_uniform4f(location, [values[0], values[1], values[2], values[3]])
+            else raise "Invalid uniform length #{values.length}."
+        end
     end
     def self.from_sources (vertex_shader_string, fragment_shader_string)
         vert = Shader.new(:"vertex")
