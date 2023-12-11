@@ -4,6 +4,9 @@ require_relative "program"
 include GL
 include GLFW
 
+TARGET_FPS = 60
+FRAME_TIME = 1.0 / TARGET_FPS
+
 # Vertex indices.
 VERTICES = [
     [1.0, 1.0, 0.0],
@@ -63,25 +66,11 @@ class Context
     end
     # KeyDown event.
     def on_keydown (kevent)
-        translate_x = case
-            when kevent.key == GLFW::KEYS[":D"] then 1
-            when kevent.key == GLFW::KEYS[:"A"] then -1
-            else 0
-        end
-        translate_y = case
-            when kevent.key == GLFW::KEYS[:"W"] then 1
-            when kevent.key == GLFW::KEYS[:"S"] then -1
-            else 0
-        end
-        @position[0] += translate_x
-        @position[1] += translate_y
-        if translate_x + translate_y != 0 then
-            send_camera_uniform()
-            render()
-        end
+        @held_keys.add(kevent.key)
     end
     # KeyUp event.
     def on_keyup (kevent)
+        @held_keys.delete(kevent.key)
         @running = false if kevent.key == GLFW::KEYS[:"ESCAPE"]
     end
     # Resize event.
@@ -96,6 +85,32 @@ class Context
         GL::draw_elements(GL::Triangles, INDICES.flatten.length, GL::UnsignedInteger, 0)
         @window.swap_buffers()
     end
+    def process_held_keys (elapsed_time_ms)
+        translate_x = case
+            when @held_keys.include?(GLFW::KEYS[:"D"]) then 0.002
+            when @held_keys.include?(GLFW::KEYS[:"A"]) then -0.002
+            else 0
+        end
+        translate_y = case
+            when @held_keys.include?(GLFW::KEYS[:"LEFT_SHIFT"]) then 0.002
+            when @held_keys.include?(GLFW::KEYS[:"LEFT_CONTROL"]) then -0.002
+            else 0
+        end
+        translate_z = case
+            when @held_keys.include?(GLFW::KEYS[:"W"]) then 0.002
+            when @held_keys.include?(GLFW::KEYS[:"S"]) then -0.002
+            else 0
+        end
+        @position[0] += translate_x * elapsed_time_ms
+        @position[1] += translate_y * elapsed_time_ms
+        @position[2] += translate_z * elapsed_time_ms
+        if translate_x + translate_y + translate_z != 0 then
+            # puts "Position: #{@position} | Translation: #{[ translate_x, translate_y, translate_z ]} | Elapsed ms: #{time_elapsed_ms}"
+            #@BUG When holding Shift and W, circle will disappear and y/z positions jump up to hundreds
+            send_camera_uniform()
+            render()
+        end
+    end
     # Begin main loop.
     def begin
         raise "OpenGL not initialized!" unless GLFW::is_initialized?()
@@ -106,15 +121,26 @@ class Context
         @window.add_observer(self)
         send_camera_uniform()
         send_size_uniform(*@window.framebuffer_size())
+        last_frame_time = Time.now
         render()
         while !@window.should_close & @running == true do
-           GLFW::wait_for_events()
+            # Time since last render was over.
+            elapsed_time = Time.now - last_frame_time
+            if elapsed_time < FRAME_TIME then
+                sleep(FRAME_TIME - elapsed_time)
+                elapsed_time = Time.now - last_frame_time
+            end
+            #@TODO: Calculate time between frames, move camera based on time spent between frames
+            GLFW::poll_events()
+            process_held_keys(elapsed_time * 1000)
+            last_frame_time = Time.now
         end
         @window.destroy()
     end
     # Set initial parameters.
     def initialize
-        @position = [ 0, 0, 0 ]
+        @position = [ 0.0, 0.0, 0.0 ]
+        @held_keys = Set.new()
         @running = true
     end
     # Ensure everything is private.
