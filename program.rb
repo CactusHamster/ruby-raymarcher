@@ -35,20 +35,29 @@ class Program
         raise RuntimeError.new("Failed to find uniform `#{name}`.") if location < 0
         return location
     end
-    def set_float_uniform (name, *values)
-        location = uniform_location(name)
-        #raise "Invalid uniform length #{value.length}." if value.length > 4 or value.length < 1
-        #GL::set_uniform1f(location, value) if value.length == 1
-        #GL::set_uniform2f(location, value) if value.length == 2
-        #GL::set_uniform3f(location, value) if value.length == 3
-        #GL::set_uniform4f(location, value) if value.length == 4
-        case values.length
-            when 1 then GL::set_uniform1f(location, [values[0]])
-            when 2 then GL::set_uniform2f(location, [values[0], values[1]])
-            when 3 then GL::set_uniform3f(location, [values[0], values[1], values[2]])
-            when 4 then GL::set_uniform4f(location, [values[0], values[1], values[2], values[3]])
-            else raise "Invalid uniform length #{values.length}."
+    def resolve_uniform_locator (name_or_location)
+        location = case
+            when name_or_location.is_a?(Integer) then name_or_location
+            when name_or_location.is_a?(String) then uniform_location(name_or_location)
+            else raise RuntimeError.new("Invalid uniform location/name.")
         end
+        return location
+    end
+    def set_float_uniform (name, *values)
+        location = resolve_uniform_locator(name)
+        raise "Invalid uniform length #{values.length}." if values.length > 4 or values.length < 1
+        GL::set_uniform1f(location, values) if values.length == 1
+        GL::set_uniform2f(location, values) if values.length == 2
+        GL::set_uniform3f(location, values) if values.length == 3
+        GL::set_uniform4f(location, values) if values.length == 4
+    end
+    def set_int_uniform (name, *values)
+        location = resolve_uniform_locator(name)
+        raise "Invalid uniform length #{values.length}." if values.length > 4 or values.length < 1
+        GL::set_uniform1i(location, values) if values.length == 1
+        GL::set_uniform2i(location, values) if values.length == 2
+        GL::set_uniform3i(location, values) if values.length == 3
+        GL::set_uniform4i(location, values) if values.length == 4
     end
     def self.from_sources (vertex_shader_string, fragment_shader_string)
         vert = Shader.new(:"vertex")

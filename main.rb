@@ -4,9 +4,6 @@ require_relative "program"
 include GL
 include GLFW
 
-TARGET_FPS = 60
-FRAME_TIME = 1.0 / TARGET_FPS
-
 # Vertex indices.
 VERTICES = [
     [1.0, 1.0, 0.0],
@@ -21,14 +18,10 @@ INDICES = [
 ];
 
 class Context
-    # Window creation.
-    def init_window ()
-        @window = GLFW::Window.new(600, 800, "raymarcher")
-        @window.make_current()
-        size = @window.framebuffer_size()
-        GL::viewport size[0], size[1]
-        GL::set_clear_color(0, 1, 0)
-    end
+    MOVE_SPEED_PER_MILLISECOND = 0.006
+    TARGET_FPS = 60
+    FRAME_TIME = 1.0 / TARGET_FPS
+
     # Shader loading, compilation, and linking; and program creation
     def init_shaders ()
         # Vertex Array Object ( Pointers to vertices in the VBO )
@@ -56,73 +49,126 @@ class Context
         @program = Program.from_sources(File.read("vert.glsl"), File.read("frag.glsl"))
         @program.use()
     end
-    # Set uniform vec3 camera - holds camera position data.
-    def send_camera_uniform ()
-        @program.set_float_uniform("camera", *@position)
+
+    def update_rotation (pitch, yaw)
+        @rotation = [
+            # Keep pitch between -PI and PI to prevent gimbal lock.
+            [pitch, -Math::PI / 2, Math::PI / 2].sort[1],
+            yaw
+        ]
     end
-    # Set float aspect_ratio - holds the screen's aspect ratio.
-    def send_size_uniform (width, height)
-        @program.set_float_uniform("aspect_ratio", width.to_f / height)
+
+    # Update uniforms.
+    def send_camera_uniform() = @program.set_float_uniform("camera", *@position)
+    def send_aspect_ratio_uniform(width, height) = @program.set_float_uniform("aspect_ratio", width.to_f / height)
+    def send_rotation_uniform() = @program.set_float_uniform("rotation", *@rotation)
+        
+    # Set all uniforms.
+    def initialize_uniforms ()
+        send_camera_uniform()
+        send_rotation_uniform()
+        send_aspect_ratio_uniform(*@window.framebuffer_size())
     end
-    # KeyDown event.
-    def on_keydown (kevent)
-        @held_keys.add(kevent.key)
-    end
-    # KeyUp event.
-    def on_keyup (kevent)
-        @held_keys.delete(kevent.key)
-        @running = false if kevent.key == GLFW::KEYS[:"ESCAPE"]
-    end
-    # Resize event.
-    def on_resized (size)
-        GL::viewport(*size)
-        send_size_uniform(*size)
-        render()
-    end
+
     # Draw shaders to window.
     def render ()
         GL::clear()
         GL::draw_elements(GL::Triangles, INDICES.flatten.length, GL::UnsignedInteger, 0)
         @window.swap_buffers()
     end
-    def process_held_keys (elapsed_time_ms)
-        translate_x = case
-            when @held_keys.include?(GLFW::KEYS[:"D"]) then 0.002
-            when @held_keys.include?(GLFW::KEYS[:"A"]) then -0.002
-            else 0
-        end
-        translate_y = case
-            when @held_keys.include?(GLFW::KEYS[:"LEFT_SHIFT"]) then 0.002
-            when @held_keys.include?(GLFW::KEYS[:"LEFT_CONTROL"]) then -0.002
-            else 0
-        end
-        translate_z = case
-            when @held_keys.include?(GLFW::KEYS[:"W"]) then 0.002
-            when @held_keys.include?(GLFW::KEYS[:"S"]) then -0.002
-            else 0
-        end
-        @position[0] += translate_x * elapsed_time_ms
-        @position[1] += translate_y * elapsed_time_ms
-        @position[2] += translate_z * elapsed_time_ms
-        if translate_x + translate_y + translate_z != 0 then
-            # puts "Position: #{@position} | Translation: #{[ translate_x, translate_y, translate_z ]} | Elapsed ms: #{time_elapsed_ms}"
-            #@BUG When holding Shift and W, circle will disappear and y/z positions jump up to hundreds
-            send_camera_uniform()
-            render()
-        end
+
+    # Resize event.
+    def on_resized (size)
+        GL::viewport(*size)
+        send_aspect_ratio_uniform(*size)
     end
+
+    # Keyboard events.
+    def on_keydown (kevent)
+        @window.cursor_mode(GLFW::CURSOR_NORMAL) if kevent.key == GLFW::KEYS[:"LEFT_ALT"]
+    end
+    def on_keyup (kevent)
+        @window.cursor_mode(GLFW::CURSOR_DISABLE) if kevent.key == GLFW::KEYS[:"LEFT_ALT"]
+    end
+
+    # True if a key is currently held down.
+    def key_held? (keyname)
+        return @window.key_pressed?(GLFW::KEYS[keyname])
+    end
+
+    # Process keyboard input.
+    def process_held_keys (elapsed_time_ms)
+        translate_left_right = case
+            when key_held?(:"D") then 1
+            when key_held?(:"A") then -1
+            else 0
+        end
+        translate_up_down = case
+            when key_held?(:"SPACE") then 1
+            when key_held?(:"LEFT_SHIFT") then -1
+            else 0
+        end
+        translate_depth = case
+            when key_held?(:"W") then 1
+            when key_held?(:"S") then -1
+            else 0
+        end
+
+        update_camera = false
+        if translate_depth != 0 then
+            magnitude = translate_depth * MOVE_SPEED_PER_MILLISECOND * elapsed_time_ms
+            angle = @rotation[1]
+            @position[0] += magnitude * Math.sin(angle)
+            @position[2] += magnitude * Math.cos(angle)
+            update_camera = true
+        end
+        if translate_left_right != 0 then
+            magnitude = translate_left_right * MOVE_SPEED_PER_MILLISECOND * elapsed_time_ms
+            angle = @rotation[1]
+            @position[0] += magnitude * Math.cos(angle)
+            @position[2] -= magnitude * Math.sin(angle)
+            update_camera = true
+        end
+        if translate_up_down != 0 then
+            @position[1] += translate_up_down * elapsed_time_ms * MOVE_SPEED_PER_MILLISECOND
+            update_camera = true
+        end
+        send_camera_uniform() if update_camera
+
+        # ESC to quit.
+        @running = false if key_held?(:"ESCAPE")
+    end
+
+    def process_mouse_movement (dx, dy)
+        return nil if dx * dx + dy * dy == 0
+        dx = dx / 1000
+        dy = dy / 1000
+        update_rotation(@rotation[0] + dy, @rotation[1] + dx)
+        send_rotation_uniform()
+    end
+
     # Begin main loop.
     def begin
+        # Setup.
         raise "OpenGL not initialized!" unless GLFW::is_initialized?()
-        init_window
-        init_shaders
+        # @window = GLFW::Window.new(600, 800, "raymarcher")
+        @window = GLFW::Window.new(450, 450, "raymarcher")
+        @window.make_current()
+        @window.cursor_mode(GLFW::CURSOR_DISABLE)
+        size = @window.framebuffer_size()
+        GL::viewport size[0], size[1]
+        GL::set_clear_color(0, 1, 0)
+        init_shaders()
         @window.start_framebuffer_size_events()
         @window.start_key_events()
         @window.add_observer(self)
-        send_camera_uniform()
-        send_size_uniform(*@window.framebuffer_size())
+        initialize_uniforms()
+
+        # Main loop.
+        #@TODO: Calculate mouse dx and dy since last frame here.
         last_frame_time = Time.now
-        render()
+        last_mouse_position = [ 0.0, 0.0 ]
+        first_mouse = true
         while !@window.should_close & @running == true do
             # Time since last render was over.
             elapsed_time = Time.now - last_frame_time
@@ -130,40 +176,35 @@ class Context
                 sleep(FRAME_TIME - elapsed_time)
                 elapsed_time = Time.now - last_frame_time
             end
-            #@TODO: Calculate time between frames, move camera based on time spent between frames
             GLFW::poll_events()
+            mouse_position = @window.get_mouse_position()
+            if first_mouse == true then
+                last_mouse_position = mouse_position 
+                first_mouse = false
+            end
+            mouse_movement = [ mouse_position[0] - last_mouse_position[0], mouse_position[1] - last_mouse_position[1] ]
             process_held_keys(elapsed_time * 1000)
+            process_mouse_movement(*mouse_movement)
+            render()
             last_frame_time = Time.now
+            last_mouse_position = mouse_position
         end
+
+        # Cleanup.
         @window.destroy()
     end
+
     # Set initial parameters.
     def initialize
-        @position = [ 0.0, 0.0, 0.0 ]
-        @held_keys = Set.new()
         @running = true
+        @position = [ 0.0, 0.0, -3.0 ]
+        @rotation = [ 0.0, 0.0 ]
     end
+
     # Ensure everything is private.
-    private :init_window, :init_shaders, :render
+    private :init_shaders, :render
 end
 
 GLFW::init()
 ctx = Context.new()
 ctx.begin()
-
-# Create a camera.
-#camera = Camera.new()
-
-# Listen for key and resize events.
-#event_handler = EventHandler.new(win, camera)
-#win.add_observer(event_handler)
-
-# Main loop.
-#game_running = true
-#win.start_framebuffer_size_events()
-#win.start_key_events()
-#render win
-#while !win.should_close() & game_running do
-#    GLFW::wait_for_events()
-#end
-#win.destroy()

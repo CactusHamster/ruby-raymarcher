@@ -284,16 +284,58 @@ VALUE rb_window_start_key_events (VALUE self) {
     glfwSetKeyCallback(window, rb_window_key_callback);
     return Qnil;
 }
-VALUE rb_window_get_key_state (VALUE self, VALUE key) {
-    Check_Type(key, T_FIXNUM);
+VALUE rb_window_get_key_state (VALUE self, VALUE rb_key) {
+    Check_Type(rb_key, T_FIXNUM);
     GLFWwindow *window = window_from_self(self);
-    return INT2NUM(glfwGetKey(window, NUM2INT(key)));
+    return INT2NUM(glfwGetKey(window, NUM2INT(rb_key)));
+}
+VALUE rb_window_key_pressed (VALUE self, VALUE rb_key) {
+    Check_Type(rb_key, T_FIXNUM);
+    GLFWwindow *window = window_from_self(self);
+    int key = NUM2INT(rb_key);
+    int state = glfwGetKey(window, key);
+    return state == GLFW_PRESS ? Qtrue : Qfalse;
 }
 VALUE rb_window_swap_buffers (VALUE self) {
     GLFWwindow *window = window_from_self(self);
     glfwSwapBuffers(window);
     return Qnil;
 }
+VALUE rb_window_cursor_mode (VALUE self, VALUE rb_mode) {
+    // glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    int mode = NUM2INT(rb_mode);
+    if (mode != GLFW_CURSOR_NORMAL && mode != GLFW_CURSOR_HIDDEN && mode != GLFW_CURSOR_DISABLED) {
+        rb_raise(rb_eArgError, "Unrecognized integer given for mouse mode.");
+        return Qnil;
+    }
+    GLFWwindow *window = window_from_self(self);
+    glfwSetInputMode(window, GLFW_CURSOR, mode);
+    return Qnil;
+}
+
+void rb_window_mouse_position_callback (GLFWwindow* window, double x, double y) {
+    VALUE rubywin = (VALUE) glfwGetWindowUserPointer(window);
+    VALUE ary = rb_ary_new2(2);
+    rb_ary_store(ary, 0, DBL2NUM(x));
+    rb_ary_store(ary, 1, DBL2NUM(y));
+    rb_window_emit(rubywin, rb_str_new_cstr("mouse_move"), ary);
+}
+
+VALUE rb_window_start_mouse_position_events (VALUE self) {
+    GLFWwindow *window = window_from_self(self);
+    glfwSetCursorPosCallback(window, rb_window_mouse_position_callback);
+    return Qnil;
+}
+VALUE rb_window_get_cursor_position (VALUE self) {
+    double x, y;
+    GLFWwindow *window = window_from_self(self);
+    glfwGetCursorPos(window, &x, &y);
+    VALUE ary = rb_ary_new2(2);
+    rb_ary_store(ary, 0, DBL2NUM(x));
+    rb_ary_store(ary, 1, DBL2NUM(y));
+    return ary;
+}
+
 void init_window_under (VALUE module) {
     VALUE window_class = rb_define_class_under(module, "Window", rb_cObject);
     rb_define_alloc_func(window_class, rb_window_allocate);
@@ -304,11 +346,15 @@ void init_window_under (VALUE module) {
     rb_define_method(window_class, "start_key_events", rb_window_start_key_events, 0);
     rb_define_method(window_class, "start_framebuffer_size_events", rb_window_start_framebuffer_size_events, 0);
     rb_define_method(window_class, "get_key_state", rb_window_get_key_state, 1);
+    rb_define_method(window_class, "key_pressed?", rb_window_key_pressed, 1);
     rb_define_method(window_class, "destroy", rb_window_destroy, 0);
     rb_define_method(window_class, "add_observer", rb_window_add_observer, 1);
     rb_define_method(window_class, "del_observer", rb_window_del_observer, 1);
     rb_define_method(window_class, "emit", rb_window_emit, 2);
     rb_define_method(window_class, "swap_buffers", rb_window_swap_buffers, 0);
+    rb_define_method(window_class, "cursor_mode", rb_window_cursor_mode, 1);
+    rb_define_method(window_class, "start_mouse_position_events", rb_window_start_mouse_position_events, 0);
+    rb_define_method(window_class, "get_mouse_position", rb_window_get_cursor_position, 0);
 }
 /*
     End of Window.
@@ -337,23 +383,32 @@ VALUE rb_glfw_wait_for_events () {
     return Qnil;
 }
 /// Get the scancode of a key.
-VALUE rb_glfw_get_scancode (VALUE key) {
+VALUE rb_glfw_get_scancode (VALUE self, VALUE key) {
     return INT2NUM(glfwGetKeyScancode(NUM2INT(key)));
 }
 void error_callback(int code, const char* description) { printf("[ERR]: %i %s", code, description); }
 /// Initialize GLFW context.
-VALUE rb_glfw_init (void) {
+VALUE rb_glfw_init () {
     glfwSetErrorCallback(error_callback);
     int success = glfwInit();
     GLFW_INITIALIZED = success == GLFW_TRUE ? TRUE : FALSE;
     return success == GLFW_TRUE ? Qtrue : Qfalse;
 }
+
+
+
 /// Initialize the Ruby GLFW module.
 VALUE init_general_glfw () {
     VALUE glfw_module = rb_define_module("GLFW");
-    rb_define_const(glfw_module, "KEYDOWN", GLFW_PRESS);
-    rb_define_const(glfw_module, "KEYUP", GLFW_RELEASE);
-    rb_define_const(glfw_module, "KEYREPEAT", GLFW_REPEAT);
+    // Key event modes
+    rb_define_const(glfw_module, "KEY_DOWN", INT2NUM(GLFW_PRESS));
+    rb_define_const(glfw_module, "KEY_UP", INT2NUM(GLFW_RELEASE));
+    rb_define_const(glfw_module, "KEY_REPEAT", INT2NUM(GLFW_REPEAT));
+    // Cursor modes
+    rb_define_const(glfw_module, "CURSOR_NORMAL", INT2NUM(GLFW_CURSOR_NORMAL));
+    rb_define_const(glfw_module, "CURSOR_HIDE", INT2NUM(GLFW_CURSOR_HIDDEN));
+    rb_define_const(glfw_module, "CURSOR_DISABLE", INT2NUM(GLFW_CURSOR_DISABLED));
+
     rb_define_module_function(glfw_module, "init", rb_glfw_init, 0);
     rb_define_module_function(glfw_module, "destroy", rb_glfw_destroy, 0);
     rb_define_module_function(glfw_module, "poll_events", rb_glfw_poll_events, 0);
