@@ -10,20 +10,36 @@ uniform vec3 camera;
 uniform vec2 rotation;
 // Aspect ratio of GLFW window.
 uniform float aspect_ratio;
+// Height of the plane to walk on.
+uniform float ground_height;
 
-#define EPSILON 0.0001
-#define ITERATIONS 120
+#define EPSILON 0.01
+#define ITERATIONS 110
 #define GAMMA 2.2
 #define BACKGROUND_COLOR vec3(0.0, 0.0, 0.0);
-#define AMBIENT_OCCLUSION_STRENGTH 0.5
+#define AMBIENT_OCCLUSION_STRENGTH 0.1
+#define PI 3.1415926535897932384626433832795
+
+// https://stackoverflow.com/questions/15095909/from-rgb-to-hsv-in-opengl-glsl
+vec3 hsv2rgb(vec3 c) {
+    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
 
 // Sphere.
 float sdf_sphere (vec3 pos, float radius) {
+    // Repeat.
     return length(pos) - radius;
 }
 
-float sdf_plane () {
-    return 0.0;
+float sdf_torus(vec3 pos, vec2 t) {
+  vec2 q = vec2(length(pos.xz)-t.x,pos.y);
+  return length(q)-t.y;
+}
+
+float sdf_floor (vec3 pos) {
+    return pos.y - ground_height + 11;
 }
 
 // Mandelbulb.
@@ -73,7 +89,14 @@ float sdf_xor(float sdf1, float sdf2) {
 
 float SDF (vec3 pos) {
     // pos.xyz = mod(pos.xyz, 5.0) - 5.0 / 2.0;
-    return sdf_mandelbulb(pos, 25, 6.0, 9.0);
+    // return sdf_mandelbulb(pos, 25, 6.0, 9.0);
+    return sdf_union(
+        sdf_intersection(
+            sdf_floor(pos),
+            sdf_sphere(mod(pos.xyz, 170.0) - 170.0 / 2.0, 100.0)
+        ),
+        sdf_sphere(mod(pos.xyz, 170.0) - 170.0 / 2, 10.0)
+    );
 }
 
 void trace (vec3 start_position, vec3 direction, out int i, out vec3 final_position) {
@@ -105,8 +128,8 @@ void apply_rotations_to(out vec3 direction) {
     ) * direction;
 }
 
+// Direction of the vector to pass through this pixel. I know using the aspect ratio as the third component is weird.
 vec3 calc_ray_direction () {
-    // Direction of the vector to pass through this pixel. I know using the aspect ratio as the third component is weird.
     vec3 direction = normalize(vec3(
         vertex_position.x * aspect_ratio,
         vertex_position.y,
@@ -116,21 +139,30 @@ vec3 calc_ray_direction () {
     return direction;
 }
 
+// Apply ambient occlusion to a color, based on the ray steps it took to reach the object.
 float ambient_occlusion (int raymarcher_iterations) {
     return 1.0 - smoothstep(0.0, 1.0, float(raymarcher_iterations) / ITERATIONS);
 }
 
-vec3 gamma_correction (vec3 color) {
-    return pow(color, vec3(1.0 / GAMMA));
-}
+// Apply gamma correction to a color.
+vec3 gamma_correction (vec3 color) { return pow(color, vec3(1.0 / GAMMA)); }
 
+// Calculate the main color of the scene.
 vec3 calc_color (int iterations, vec3 final_position) {
-    vec3 color = vec3(0.2549, 0.8392, 1.0);
+    // Length of the ray from camera to point.
+    float len = distance(camera, final_position);
+    // Main color.
+    vec3 color = vec3(1.0, 1.0, 1.0);
+    // Luminance
+    color = color * vec3(10000.0 / (4.0 * PI * len * len));
+    // AO
     color = color * vec3(ambient_occlusion(iterations));
+    // Gamma
     color = gamma_correction(color);
     return color;
 }
 
+// March and color.
 void main () {
     // Ray marching.
     int iterations;

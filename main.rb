@@ -1,6 +1,8 @@
 require_relative "ext/window_utils/window_utils"
 require_relative "shader"
 require_relative "program"
+require_relative "vector"
+require_relative "player"
 include GL
 include GLFW
 
@@ -17,52 +19,62 @@ INDICES = [
     [1, 2, 3]
 ];
 
+
+
 class Context
-    MOVE_SPEED_PER_MILLISECOND = 0.006
+    #     MOVE_SPEED_PER_SECOND = 6
     TARGET_FPS = 60
     FRAME_TIME = 1.0 / TARGET_FPS
+    GROUND_HEIGHT = 0.0
+    WINDOW_WIDTH = 800
+    WINDOW_HEIGHT = 800
 
     # Shader loading, compilation, and linking; and program creation
     def init_shaders ()
         # Vertex Array Object ( Pointers to vertices in the VBO )
         vao = GL::alloc_vertex_array_object()
         GL::bind_vertex_array_object(vao)
-
+        
         # Vertex Buffer Object ( For vertex positions )
         vbo = GL::alloc_buffer_object()
         GL::bind_buffer_object(GL::BufferType::Array, vbo)
         GL::set_buffer_data(GL::BufferType::Array, VERTICES.flatten().pack("F*"), GL::STATIC_DRAW)
-
+        
         # Element Buffer Object ( For vertex indices )
         ebo = GL::alloc_buffer_object()
         GL::bind_buffer_object(GL::BufferType::ElementArray, ebo)
         GL::set_buffer_data(GL::BufferType::ElementArray, INDICES.flatten().pack("L*"), GL::STATIC_DRAW)
-
+        
         # Finish VAO stuff
         GL::enable_vertex_attribute_array(0)
         GL::set_vertex_attribute_pointer(0, 3, GL::Float, false, 0)
-
+        
         GL::unbind_buffer_object(GL::BufferType::Array)
         # GL::unbind_buffer_object(GL::BufferType::ElementArray)
-
+        
         # Make and use shader program
         @program = Program.from_sources(File.read("vert.glsl"), File.read("frag.glsl"))
         @program.use()
     end
 
-    def update_rotation (pitch, yaw)
-        @rotation = [
-            # Keep pitch between -PI and PI to prevent gimbal lock.
-            [pitch, -Math::PI / 2, Math::PI / 2].sort[1],
-            yaw
-        ]
+    # Update uniforms.
+    def send_camera_uniform
+        @program.set_float_uniform("camera", *@player.position)
     end
 
-    # Update uniforms.
-    def send_camera_uniform() = @program.set_float_uniform("camera", *@position)
-    def send_aspect_ratio_uniform(width, height) = @program.set_float_uniform("aspect_ratio", width.to_f / height)
-    def send_rotation_uniform() = @program.set_float_uniform("rotation", *@rotation)
-        
+    def send_aspect_ratio_uniform(width, height)
+        @program.set_float_uniform("aspect_ratio", width.to_f / height)
+    end
+
+    def send_rotation_uniform
+        @program.set_float_uniform("rotation", *@player.rotation)
+    end
+
+    def send_ground_height_uniform
+        @program.set_float_uniform("ground_height", GROUND_HEIGHT)
+    end
+
+
     # Set all uniforms.
     def initialize_uniforms ()
         send_camera_uniform()
@@ -75,6 +87,11 @@ class Context
         GL::clear()
         GL::draw_elements(GL::Triangles, INDICES.flatten.length, GL::UnsignedInteger, 0)
         @window.swap_buffers()
+    end
+
+    # True if a key is currently held down.
+    def key_held? (keyname)
+        return @window.key_pressed?(GLFW::KEYS[keyname])
     end
 
     # Resize event.
@@ -91,68 +108,22 @@ class Context
         @window.cursor_mode(GLFW::CURSOR_DISABLE) if kevent.key == GLFW::KEYS[:"LEFT_ALT"]
     end
 
-    # True if a key is currently held down.
-    def key_held? (keyname)
-        return @window.key_pressed?(GLFW::KEYS[keyname])
-    end
-
     # Process keyboard input.
-    def process_held_keys (elapsed_time_ms)
-        translate_left_right = case
-            when key_held?(:"D") then 1
-            when key_held?(:"A") then -1
-            else 0
-        end
-        translate_up_down = case
-            when key_held?(:"SPACE") then 1
-            when key_held?(:"LEFT_SHIFT") then -1
-            else 0
-        end
-        translate_depth = case
-            when key_held?(:"W") then 1
-            when key_held?(:"S") then -1
-            else 0
-        end
-
-        update_camera = false
-        if translate_depth != 0 then
-            magnitude = translate_depth * MOVE_SPEED_PER_MILLISECOND * elapsed_time_ms
-            angle = @rotation[1]
-            @position[0] += magnitude * Math.sin(angle)
-            @position[2] += magnitude * Math.cos(angle)
-            update_camera = true
-        end
-        if translate_left_right != 0 then
-            magnitude = translate_left_right * MOVE_SPEED_PER_MILLISECOND * elapsed_time_ms
-            angle = @rotation[1]
-            @position[0] += magnitude * Math.cos(angle)
-            @position[2] -= magnitude * Math.sin(angle)
-            update_camera = true
-        end
-        if translate_up_down != 0 then
-            @position[1] += translate_up_down * elapsed_time_ms * MOVE_SPEED_PER_MILLISECOND
-            update_camera = true
-        end
-        send_camera_uniform() if update_camera
-
+    def process_held_keys (elapsed_time)
         # ESC to quit.
         @running = false if key_held?(:"ESCAPE")
     end
 
-    def process_mouse_movement (dx, dy)
-        return nil if dx * dx + dy * dy == 0
-        dx = dx / 1000
-        dy = dy / 1000
-        update_rotation(@rotation[0] + dy, @rotation[1] + dx)
-        send_rotation_uniform()
+    # Process mouse input.
+    def process_mouse_movement (elapsed_time, dx, dy)
+        return nil
     end
 
     # Begin main loop.
     def begin
         # Setup.
         raise "OpenGL not initialized!" unless GLFW::is_initialized?()
-        # @window = GLFW::Window.new(600, 800, "raymarcher")
-        @window = GLFW::Window.new(450, 450, "raymarcher")
+        @window = GLFW::Window.new(WINDOW_WIDTH, WINDOW_HEIGHT, "raymarcher")
         @window.make_current()
         @window.cursor_mode(GLFW::CURSOR_DISABLE)
         size = @window.framebuffer_size()
@@ -162,10 +133,10 @@ class Context
         @window.start_framebuffer_size_events()
         @window.start_key_events()
         @window.add_observer(self)
+        @window.add_observer(@player)
         initialize_uniforms()
-
+        
         # Main loop.
-        #@TODO: Calculate mouse dx and dy since last frame here.
         last_frame_time = Time.now
         last_mouse_position = [ 0.0, 0.0 ]
         first_mouse = true
@@ -183,13 +154,19 @@ class Context
                 first_mouse = false
             end
             mouse_movement = [ mouse_position[0] - last_mouse_position[0], mouse_position[1] - last_mouse_position[1] ]
-            process_held_keys(elapsed_time * 1000)
-            process_mouse_movement(*mouse_movement)
+            
+            # Process user input and update player.
+            process_held_keys(elapsed_time)
+            process_mouse_movement(elapsed_time, *mouse_movement)
+            @player.update(elapsed_time, mouse_movement)
+
+            # Render the scene.
             render()
+            
             last_frame_time = Time.now
             last_mouse_position = mouse_position
         end
-
+        
         # Cleanup.
         @window.destroy()
     end
@@ -197,8 +174,7 @@ class Context
     # Set initial parameters.
     def initialize
         @running = true
-        @position = [ 0.0, 0.0, -3.0 ]
-        @rotation = [ 0.0, 0.0 ]
+        @player = Player.new(self)
     end
 
     # Ensure everything is private.
