@@ -12,13 +12,17 @@ uniform vec2 rotation;
 uniform float aspect_ratio;
 // Height of the plane to walk on.
 uniform float ground_height;
+// Time since the render started.
+uniform float time;
 
 #define EPSILON 0.01
-#define ITERATIONS 110
+#define ITERATIONS 150 // 175
 #define GAMMA 2.2
 #define BACKGROUND_COLOR vec3(0.0, 0.0, 0.0);
-#define AMBIENT_OCCLUSION_STRENGTH 0.1
+#define AMBIENT_OCCLUSION_STRENGTH 0.7
 #define PI 3.1415926535897932384626433832795
+#define SPHERE_LUMINANCE 100000
+#define SPHERE_COLOR vec3(1.0, 1.0, 1.0)
 
 // https://stackoverflow.com/questions/15095909/from-rgb-to-hsv-in-opengl-glsl
 vec3 hsv2rgb(vec3 c) {
@@ -44,7 +48,7 @@ float sdf_floor (vec3 pos) {
 
 // Mandelbulb.
 float sdf_mandelbulb(vec3 pos, int iterations, float bailout, float power) {
-	vec3 z = pos;
+	vec3 z = pos / vec3(7.0);
 	float dr = 1.0;
 	float r = 0.0;
 	for (int i = 0; i < iterations ; i++) {
@@ -88,14 +92,12 @@ float sdf_xor(float sdf1, float sdf2) {
 }
 
 float SDF (vec3 pos) {
-    // pos.xyz = mod(pos.xyz, 5.0) - 5.0 / 2.0;
-    // return sdf_mandelbulb(pos, 25, 6.0, 9.0);
     return sdf_union(
-        sdf_intersection(
+        sdf_union(
             sdf_floor(pos),
-            sdf_sphere(mod(pos.xyz, 170.0) - 170.0 / 2.0, 100.0)
+            sdf_sphere(mod(pos.xyz, 170.0) - 170.0 / 2, 10.0)
         ),
-        sdf_sphere(mod(pos.xyz, 170.0) - 170.0 / 2, 10.0)
+        sdf_mandelbulb(pos, 25, abs(mod(time, 4.0) - 2.0), 8.0)
     );
 }
 
@@ -141,7 +143,7 @@ vec3 calc_ray_direction () {
 
 // Apply ambient occlusion to a color, based on the ray steps it took to reach the object.
 float ambient_occlusion (int raymarcher_iterations) {
-    return 1.0 - smoothstep(0.0, 1.0, float(raymarcher_iterations) / ITERATIONS);
+    return (1.0 - AMBIENT_OCCLUSION_STRENGTH * smoothstep(0.0, 1.0, float(raymarcher_iterations) / ITERATIONS));
 }
 
 // Apply gamma correction to a color.
@@ -149,16 +151,18 @@ vec3 gamma_correction (vec3 color) { return pow(color, vec3(1.0 / GAMMA)); }
 
 // Calculate the main color of the scene.
 vec3 calc_color (int iterations, vec3 final_position) {
-    // Length of the ray from camera to point.
-    float len = distance(camera, final_position);
+    if (distance(camera, final_position) > 5000.0) return BACKGROUND_COLOR;
     // Main color.
-    vec3 color = vec3(1.0, 1.0, 1.0);
-    // Luminance
-    color = color * vec3(10000.0 / (4.0 * PI * len * len));
+    vec3 color = vec3(0.9, 0.9, 0.9 + abs(mod(time, 10.0) - 5.0) * 0.02);
+    // Length of ray from final position to closest sphere.
+    float light_dist = sdf_sphere(mod(final_position, 170.0) - 170.0 / 2, 10.0);
+    // Apply sphere luminance.
+    color = color * SPHERE_COLOR * vec3(SPHERE_LUMINANCE / (4.0 * PI * light_dist * light_dist));
     // AO
     color = color * vec3(ambient_occlusion(iterations));
-    // Gamma
+    // Gamma correction
     color = gamma_correction(color);
+    color = clamp(color, 0.0, 1.0);
     return color;
 }
 

@@ -74,9 +74,14 @@ class Context
         @program.set_float_uniform("ground_height", GROUND_HEIGHT)
     end
 
+    def send_time_uniform
+        @program.set_float_uniform("time", (Time.now - @time_started).to_f)
+    end
+
 
     # Set all uniforms.
     def initialize_uniforms ()
+        send_time_uniform()
         send_camera_uniform()
         send_rotation_uniform()
         send_aspect_ratio_uniform(*@window.framebuffer_size())
@@ -161,6 +166,7 @@ class Context
             @player.update(elapsed_time, mouse_movement)
 
             # Render the scene.
+            send_time_uniform()
             render()
             
             last_frame_time = Time.now
@@ -174,6 +180,7 @@ class Context
     # Set initial parameters.
     def initialize
         @running = true
+        @time_started = Time.now()
         @player = Player.new(self)
     end
 

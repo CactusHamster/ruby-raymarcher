@@ -1,17 +1,18 @@
 require_relative "ext/window_utils/window_utils"
 include GLFW
 class Player
-    MOVE_SPEED_PER_SECOND = 12
-    JUMP_SPEED = 120.0
-    GRAVITY = 7.5
+    MAX_SPEED = 1000.0
+    MOVE_SPEED_PER_SECOND = 1000.0
+    JUMP_SPEED = 240.0
+    GRAVITY = 14.0
+    FLYING = false
     attr_accessor :"position", :"rotation"
     def initialize (context)
         @context = context
-        @flying = false
         @rotation = [0.0, 0.0]
         @forces   = [0.0, 0.0, 0.0]
         @velocity = [0.0, 0.0, 0.0]
-        @position = [0, 0.0, -3.0]
+        @position = [0, 0.0, -360.0]
     end
     
     def add_rotation (pitch, yaw)
@@ -23,21 +24,21 @@ class Player
         @velocity[1] += JUMP_SPEED if on_ground?()
     end
     def apply_gravity()
-        @forces[1] -= GRAVITY if @velocity[1] > GRAVITY * -5 and not @flying
+        @forces[1] -= GRAVITY if @velocity[1] > GRAVITY * -5 and not FLYING
     end
     def apply_friction ()
-        # If we're flying, we get less friction.
-        if @flying then
+        # If we're flying, we get no friction.
+        if FLYING then
             @velocity[0] *= 0.9
             @velocity[1] *= 0.9
             @velocity[2] *= 0.9
         else
             # No friction while falling.
             if on_ground?()
-                # @forces[0] -= 0.2 * @velocity[0]
-                # @forces[2] -= 0.2 * @velocity[2]
-                @velocity[0] *= 0.9
-                @velocity[2] *= 0.9
+                @forces[0] -= 0.1 * @velocity[0]
+                @forces[2] -= 0.1 * @velocity[2]
+                # @velocity[0] *= 0.9
+                # @velocity[2] *= 0.9
             end
         end
     end
@@ -78,6 +79,16 @@ class Player
     end
     
     def process_held_keys(elapsed_time)
+
+        # Secret speed boost
+        if @context.key_held?(:"KP_ENTER") then
+            # Increase speed by order of 1000.
+            # MOVE_SPEED_PER_SECOND *= 1000
+        elsif @context.key_held?(:"RIGHT_SHIFT") then
+            # Decrease speed by order of 1000.
+            # MOVE_SPEED_PER_SECOND /= 1000
+        end
+
         # Tell direction we're moving in.
         translate_left_right = case
             when @context.key_held?(:"D") then 1
@@ -92,14 +103,14 @@ class Player
         
         update_player = false
         if translate_depth != 0
-            magnitude = translate_depth * MOVE_SPEED_PER_SECOND
+            magnitude = translate_depth * MOVE_SPEED_PER_SECOND * elapsed_time
             angle = @rotation[1]
             @velocity[0] += magnitude * Math.sin(angle)
             @velocity[2] += magnitude * Math.cos(angle)
             update_player = true
         end
         if translate_left_right != 0
-            magnitude = translate_left_right * MOVE_SPEED_PER_SECOND
+            magnitude = translate_left_right * MOVE_SPEED_PER_SECOND * elapsed_time
             angle = @rotation[1]
             @velocity[0] += magnitude * Math.cos(angle)
             @velocity[2] -= magnitude * Math.sin(angle)
@@ -107,19 +118,23 @@ class Player
         end
         
         # Extra check for up/down movement if we can fly.
-        if @flying
+        if FLYING
             translate_up_down = case
                 when @context.key_held?(:"SPACE") then 1
                 when @context.key_held?(:"LEFT_SHIFT") then -1
                 else 0
             end
             if translate_up_down != 0
-                @velocity[1] += translate_up_down * MOVE_SPEED_PER_SECOND
+                @velocity[1] += translate_up_down * MOVE_SPEED_PER_SECOND * elapsed_time
                 update_player = true
             end
         else
             if on_ground? and @context.key_held?(:"SPACE") then
                 @velocity[1] += JUMP_SPEED
+            end
+            if on_ground? and @context.key_held?(:"LEFT_SHIFT") then
+                @velocity[0] *= 0.2
+                @velocity[2] *= 0.2
             end
         end
         
